@@ -122,11 +122,15 @@ export function useSingletonOperation(
   const isMountedRef = useRef(true);
   
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      globalOperations.delete(operationId);
+      // Only clean up if this component initiated the operation
+      if (isExecuting) {
+        globalOperations.delete(operationId);
+      }
     };
-  }, [operationId]);
+  }, [operationId, isExecuting]);
   
   const execute = useCallback(async () => {
     if (globalOperations.has(operationId)) {
@@ -134,11 +138,16 @@ export function useSingletonOperation(
       return;
     }
     
+    console.log(`[SingletonOperation] Starting operation ${operationId}`);
     globalOperations.add(operationId);
     setIsExecuting(true);
     
     try {
       await operation();
+      console.log(`[SingletonOperation] Operation ${operationId} completed`);
+    } catch (error) {
+      console.error(`[SingletonOperation] Operation ${operationId} failed:`, error);
+      throw error;
     } finally {
       globalOperations.delete(operationId);
       if (isMountedRef.current) {

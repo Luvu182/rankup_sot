@@ -34,6 +34,7 @@ export function ProjectSyncModal({
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const hasStartedSync = useRef(false);
   const isMounted = useIsMounted();
   
   const updateSyncStatus = useMutation(api.projects.updateSyncStatus);
@@ -47,9 +48,15 @@ export function ProjectSyncModal({
   const performSync = async (): Promise<void> => {
     console.log('[SYNC-MODAL] Starting BigQuery sync', { bigQueryProjectId });
     
-    // Create AbortController for this request
+    // Create AbortController for this request with timeout
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    
+    // Set a timeout for the request (30 seconds)
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      console.log('[SYNC-MODAL] Request timed out after 30 seconds');
+    }, 30000);
     
     try {
       // Update status to syncing in Convex
@@ -86,6 +93,9 @@ export function ProjectSyncModal({
         }
       );
 
+      // Clear timeout
+      clearTimeout(timeoutId);
+      
       // Only update state if component is still mounted
       if (isMounted.current) {
         // Update status to synced
@@ -97,6 +107,9 @@ export function ProjectSyncModal({
         setStatus("success");
       }
     } catch (err) {
+      // Clear timeout
+      clearTimeout(timeoutId);
+      
       // Check if request was aborted
       if (err instanceof Error && err.name === 'AbortError') {
         console.log('[SYNC-MODAL] Request aborted');
@@ -132,21 +145,27 @@ export function ProjectSyncModal({
   useEffect(() => {
     console.log('[SYNC-MODAL] useEffect triggered', { 
       open, 
+      hasStartedSync: hasStartedSync.current,
       isExecuting: syncOperation.isExecuting,
       isGloballyExecuting: syncOperation.isGloballyExecuting 
     });
     
-    if (open && !syncOperation.isGloballyExecuting) {
-      // Start sync when modal opens and no sync is in progress
+    if (open && !hasStartedSync.current && !syncOperation.isGloballyExecuting) {
+      // Mark as started and execute
+      hasStartedSync.current = true;
       syncOperation.execute();
     }
-    
-    // Cleanup on unmount or when modal closes
+  }, [open, syncOperation]);
+
+  useEffect(() => {
+    // Separate cleanup effect that only runs on unmount
     return () => {
-      console.log('[SYNC-MODAL] Cleaning up for project:', bigQueryProjectId);
-      abortControllerRef.current?.abort();
+      if (!open) {
+        console.log('[SYNC-MODAL] Cleaning up for project:', bigQueryProjectId);
+        abortControllerRef.current?.abort();
+      }
     };
-  }, [open]);
+  }, [open, bigQueryProjectId]);
 
   const handleRetry = () => {
     console.log('[SYNC-MODAL] Manual retry triggered');
