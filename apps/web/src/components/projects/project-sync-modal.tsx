@@ -99,12 +99,21 @@ export function ProjectSyncModal({
       // Only update state if component is still mounted
       if (isMounted.current) {
         // Update status to synced
+        console.log('[SYNC-MODAL] Updating status to synced');
         await updateSyncStatus({
           projectId,
           status: "synced",
         });
 
         setStatus("success");
+        console.log('[SYNC-MODAL] Sync completed successfully');
+        
+        // Call onClose after a short delay to ensure state updates
+        setTimeout(() => {
+          if (isMounted.current) {
+            onClose();
+          }
+        }, 1000);
       }
     } catch (err) {
       // Clear timeout
@@ -176,7 +185,12 @@ export function ProjectSyncModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={(newOpen) => {
+      // Only allow closing if sync is complete or failed
+      if (!newOpen && (status === "success" || status === "error")) {
+        onClose();
+      }
+    }}>
       <DialogContent className="max-w-md" aria-describedby="sync-modal-description">
         <DialogHeader>
           <DialogTitle className="sr-only">Khởi tạo dự án</DialogTitle>
