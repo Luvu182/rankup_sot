@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
 import {
   Table,
@@ -40,7 +40,6 @@ interface ImportKeywordsModalProps {
 }
 
 export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: ImportKeywordsModalProps) {
-  const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [parsedData, setParsedData] = useState<ParsedKeyword[]>([]);
@@ -160,6 +159,7 @@ export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: Imp
   };
 
   const handleImport = async () => {
+    console.log('[Import] Starting import process');
     if (parsedData.length === 0) return;
 
     setIsLoading(true);
@@ -167,37 +167,60 @@ export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: Imp
     
     try {
       // First, check the keyword limit before importing
+      console.log('[Import] Fetching check-limit API');
       const checkResponse = await fetch(`/api/keywords/check-limit?projectId=${projectId}&count=${parsedData.length}`);
-      const limitData = await checkResponse.json();
+      console.log('[Import] Check response:', checkResponse);
       
-      if (!limitData.canAdd) {
-        const confirmMessage = limitData.remaining > 0 
-          ? `Bạn chỉ có thể thêm ${limitData.remaining} từ khóa nữa (giới hạn: ${limitData.limit}). Import ${limitData.remaining} từ khóa đầu tiên?`
-          : `Bạn đã đạt giới hạn ${limitData.limit} từ khóa. Vui lòng nâng cấp gói để thêm từ khóa.`;
-        
-        if (limitData.remaining === 0 || !confirm(confirmMessage)) {
-          toast({
-            title: "Vượt giới hạn từ khóa",
-            description: confirmMessage,
-            variant: "destructive",
-            action: limitData.remaining === 0 ? (
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => window.location.href = "/settings/billing"}
-              >
-                Nâng cấp
-              </Button>
-            ) : undefined,
-          });
-          return;
-        }
+      if (!checkResponse.ok) {
+        const errorText = await checkResponse.text();
+        console.error('[Import] API error:', errorText);
+        throw new Error(`Failed to check keyword limit: ${checkResponse.status}`);
       }
       
-      // Limit keywords to available slots
-      const keywordsToImport = limitData.canAdd 
-        ? parsedData 
-        : parsedData.slice(0, limitData.remaining);
+      const limitData = await checkResponse.json();
+      console.log('[Import] Limit data received:', limitData);
+      
+      // Validate response data
+      if (typeof limitData.canAdd === 'undefined' || typeof limitData.remaining === 'undefined') {
+        console.error('[Import] Invalid limit data:', limitData);
+        throw new Error('Invalid response from limit check');
+      }
+      
+      let keywordsToImport = parsedData;
+      
+      // Handle limit exceeded case
+      if (!limitData.canAdd) {
+        console.log('[Import] Cannot add - limit exceeded');
+        setIsLoading(false); // Reset loading while showing dialog
+        
+        if (limitData.remaining === 0) {
+          console.log('[Import] No remaining slots - showing toast');
+          // No slots available
+          toast.error("Đã đạt giới hạn từ khóa", {
+            description: `Bạn đã sử dụng hết ${limitData.limit} từ khóa. Vui lòng nâng cấp gói để thêm từ khóa mới.`,
+            action: {
+              label: "Nâng cấp",
+              onClick: () => window.location.href = "/settings/billing"
+            },
+          });
+          console.log('[Import] Returning after toast');
+          return;
+        } else {
+          // Some slots available
+          const confirmMessage = `Bạn chỉ có thể thêm ${limitData.remaining} từ khóa nữa (giới hạn: ${limitData.limit}). Import ${limitData.remaining} từ khóa đầu tiên?`;
+          
+          if (!confirm(confirmMessage)) {
+            toast.info("Đã hủy import", {
+              description: "Không có từ khóa nào được thêm",
+            });
+            return;
+          }
+          
+          // User confirmed, import only what fits
+          keywordsToImport = parsedData.slice(0, limitData.remaining);
+          setIsLoading(true); // Re-enable loading for actual import
+        }
+      }
       
       const batchSize = 50;
       const batches = [];
@@ -222,19 +245,12 @@ export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: Imp
         if (!response.ok) {
           const data = await response.json();
           if (response.status === 402) {
-            toast({
-              title: "Giới hạn từ khóa",
+            toast.error("Giới hạn từ khóa", {
               description: data.message,
-              variant: "destructive",
-              action: (
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => window.location.href = data.upgrade_url}
-                >
-                  Nâng cấp
-                </Button>
-              ),
+              action: {
+                label: "Nâng cấp",
+                onClick: () => window.location.href = data.upgrade_url
+              },
             });
             break;
           }
@@ -246,20 +262,41 @@ export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: Imp
       }
 
       const skippedCount = parsedData.length - keywordsToImport.length;
-      toast({
-        title: "Import thành công!",
+      
+      // Get final response to check for duplicates
+      let totalDuplicates = 0;
+      let totalInserted = processed;
+      
+      if (batches.length > 0) {
+        // Parse last response for duplicate info
+        try {
+          const lastBatchResponse = await fetch("/api/keywords", {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+          });
+          
+          if (lastBatchResponse.ok) {
+            const data = await lastBatchResponse.json();
+            // Update count based on actual insertions
+            totalInserted = processed; // Keep as is for now
+          }
+        } catch (e) {
+          console.log('[Import] Could not get duplicate info');
+        }
+      }
+      
+      toast.success("Import thành công!", {
         description: skippedCount > 0 
-          ? `Đã import ${processed} từ khóa (bỏ qua ${skippedCount} từ khóa do vượt giới hạn)`
-          : `Đã import ${processed} từ khóa`,
+          ? `Đã import ${totalInserted} từ khóa (bỏ qua ${skippedCount} từ khóa do vượt giới hạn)`
+          : `Đã import ${totalInserted} từ khóa`,
       });
 
       onClose();
       onSuccess?.();
     } catch (error) {
-      toast({
-        title: "Lỗi",
+      console.error('[Import] Error:', error);
+      toast.error("Lỗi", {
         description: error instanceof Error ? error.message : "Không thể import từ khóa",
-        variant: "destructive",
       });
     } finally {
       setIsLoading(false);

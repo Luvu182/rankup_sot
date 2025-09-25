@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useProject } from "@/hooks/use-project";
+import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import PageHeader from "@/components/ui/page-header";
 import GlassCard from "@/components/ui/glass-card";
@@ -109,12 +110,20 @@ export default function KeywordsPage() {
       });
       
       if (response.ok) {
+        toast.success("Đã xóa từ khóa");
         fetchKeywords();
       } else {
-        console.error('Failed to delete keyword');
+        const errorData = await response.json();
+        console.error('Failed to delete keyword:', errorData);
+        toast.error("Không thể xóa từ khóa", {
+          description: errorData.message || errorData.error || 'Vui lòng thử lại sau'
+        });
       }
     } catch (error) {
       console.error('Error deleting keyword:', error);
+      toast.error("Lỗi khi xóa từ khóa", {
+        description: 'Vui lòng thử lại sau'
+      });
     }
   };
 

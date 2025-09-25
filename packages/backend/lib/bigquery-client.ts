@@ -8,7 +8,7 @@ import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
 // Initialize BigQuery client
-const bigquery = new BigQuery({
+export const bigquery = new BigQuery({
   projectId: process.env.GOOGLE_CLOUD_PROJECT,
   keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
 });
@@ -289,7 +289,10 @@ export async function getKeywords(
       r.position - k.target_position as position_diff
     FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\` k
     LEFT JOIN latest_rankings r ON k.keyword_id = r.keyword_id
+    LEFT JOIN \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.deleted_keywords\` d 
+      ON k.keyword_id = d.keyword_id
     WHERE k.project_id = @projectId
+      AND d.keyword_id IS NULL  -- Filter out deleted keywords
       AND EXISTS (
         SELECT 1 
         FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.projects\` p
@@ -326,6 +329,7 @@ export async function getKeywords(
     SELECT COUNT(*) as total
     FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\` k
     WHERE k.project_id = @projectId
+      AND k.is_active = true
       AND EXISTS (
         SELECT 1 
         FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.projects\` p
@@ -637,27 +641,78 @@ export async function insertKeywordsBatch(
     target_url?: string;
   }>
 ) {
-  const table = dataset.table('keywords');
-  
-  const rows = keywords.map(k => ({
-    keyword_id: generateId(),
-    project_id: projectId,
-    keyword: k.keyword,
-    is_active: true,
-    tracking_frequency: 'daily',
-    tags: [],
-    category: k.category || null,
-    priority: k.priority || 'medium',
-    target_position: k.target_position || 3,
-    target_url: k.target_url || null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }));
-  
   try {
+    // 1. Check for existing keywords first
+    const keywordTexts = keywords.map(k => k.keyword);
+    const placeholders = keywordTexts.map((_, i) => `@keyword${i}`).join(', ');
+    
+    const checkQuery = `
+      WITH existing_keywords AS (
+        SELECT k.keyword
+        FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\` k
+        LEFT JOIN \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.deleted_keywords\` d
+          ON k.keyword_id = d.keyword_id
+        WHERE k.project_id = @projectId
+          AND d.keyword_id IS NULL
+          AND k.keyword IN (${placeholders})
+      )
+      SELECT keyword FROM existing_keywords
+    `;
+    
+    const params: any = { projectId };
+    keywordTexts.forEach((keyword, i) => {
+      params[`keyword${i}`] = keyword;
+    });
+    
+    const [existingRows] = await bigquery.query({
+      query: checkQuery,
+      params,
+    });
+    
+    const existingKeywords = new Set(existingRows.map((r: any) => r.keyword));
+    
+    // 2. Filter out duplicates
+    const newKeywords = keywords.filter(k => !existingKeywords.has(k.keyword));
+    const duplicates = keywords.filter(k => existingKeywords.has(k.keyword));
+    
+    console.log(`[BigQuery] Found ${duplicates.length} duplicate keywords, inserting ${newKeywords.length} new keywords`);
+    
+    if (newKeywords.length === 0) {
+      return { 
+        success: true, 
+        count: 0, 
+        duplicates: duplicates.length,
+        message: 'All keywords already exist'
+      };
+    }
+    
+    // 3. Insert only new keywords
+    const table = dataset.table('keywords');
+    const rows = newKeywords.map(k => ({
+      keyword_id: generateId(),
+      project_id: projectId,
+      keyword: k.keyword,
+      is_active: true,
+      tracking_frequency: 'daily',
+      tags: [],
+      category: k.category || null,
+      priority: k.priority || 'medium',
+      target_position: k.target_position || 3,
+      target_url: k.target_url || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }));
+    
     await table.insert(rows);
     console.log(`Inserted ${rows.length} keywords for project ${projectId}`);
-    return { success: true, count: rows.length };
+    
+    return { 
+      success: true, 
+      count: rows.length,
+      duplicates: duplicates.length,
+      inserted: newKeywords.map(k => k.keyword),
+      skipped: duplicates.map(k => k.keyword)
+    };
   } catch (error) {
     console.error('Error inserting keywords:', error);
     throw error;
@@ -665,12 +720,9 @@ export async function insertKeywordsBatch(
 }
 
 // Delete a keyword
+// Delete keyword using soft delete pattern with tracking table
 export async function deleteKeyword(keywordId: string, projectId: string) {
-  const query = `
-    DELETE FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\`
-    WHERE keyword_id = @keywordId 
-      AND project_id = @projectId
-  `;
+  console.log('[BigQuery] Soft deleting keyword:', { keywordId, projectId });
   
   const params = {
     keywordId,
@@ -678,16 +730,93 @@ export async function deleteKeyword(keywordId: string, projectId: string) {
   };
   
   try {
-    await bigquery.query({
-      query,
+    // IMPORTANT: Verify keyword belongs to project before deleting
+    const verifyQuery = `
+      SELECT COUNT(*) as count
+      FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\`
+      WHERE keyword_id = @keywordId 
+        AND project_id = @projectId
+    `;
+    
+    const [verifyRows] = await bigquery.query({
+      query: verifyQuery,
       params,
     });
-    console.log(`Deleted keyword ${keywordId}`);
-    return { success: true };
+    
+    if (!verifyRows[0]?.count || verifyRows[0].count === 0) {
+      console.error('[BigQuery] Keyword not found or does not belong to project');
+      throw new Error('Keyword not found or access denied');
+    }
+    
+    // Insert into deleted_keywords tracking table
+    const insertDeletedQuery = `
+      INSERT INTO \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.deleted_keywords\`
+        (keyword_id, project_id, deleted_at)
+      VALUES 
+        (@keywordId, @projectId, CURRENT_TIMESTAMP())
+    `;
+    
+    await bigquery.query({
+      query: insertDeletedQuery,
+      params,
+    });
+    
+    console.log(`[BigQuery] Keyword ${keywordId} marked as deleted`);
+    
+    // Try immediate hard delete (works if data is settled)
+    try {
+      const hardDeleteQuery = `
+        DELETE FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\`
+        WHERE keyword_id = @keywordId 
+          AND project_id = @projectId
+      `;
+      
+      const [deleteJob] = await bigquery.query({
+        query: hardDeleteQuery,
+        params,
+      });
+      
+      if (deleteJob.numDmlAffectedRows > 0) {
+        console.log(`[BigQuery] Hard deleted settled keyword ${keywordId}`);
+        // Also remove from tracking table since it's fully deleted
+        await bigquery.query({
+          query: `DELETE FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.deleted_keywords\`
+                  WHERE keyword_id = @keywordId`,
+          params: { keywordId }
+        });
+      }
+    } catch (hardDeleteError) {
+      // Expected for keywords in streaming buffer
+      console.log('[BigQuery] Keyword still in streaming buffer, will be cleaned up later');
+    }
+    
+    return { success: true, method: 'soft_delete' };
+    
   } catch (error) {
-    console.error('Error deleting keyword:', error);
+    console.error('[BigQuery] Error in deleteKeyword:', error);
     throw error;
   }
+}
+
+// Create deleted_keywords table
+export async function createDeletedKeywordsTable() {
+  const createTableQuery = `
+    CREATE TABLE IF NOT EXISTS \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.deleted_keywords\` (
+      keyword_id STRING NOT NULL,
+      project_id STRING NOT NULL,
+      deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+      deleted_by STRING,
+      reason STRING
+    )
+    OPTIONS(
+      description="Tracks soft-deleted keywords to work around BigQuery streaming buffer limitations."
+    )
+  `;
+
+  console.log('[BigQuery] Creating deleted_keywords table...');
+  await bigquery.query(createTableQuery);
+  console.log('[BigQuery] deleted_keywords table created successfully');
+  return { success: true };
 }
 
 // Update a keyword

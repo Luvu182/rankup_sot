@@ -136,8 +136,9 @@ export async function POST(request: Request) {
     }
 
     // Insert keywords into BigQuery
+    let insertResult;
     try {
-      await insertKeywordsBatch(project.bigQueryProjectId, keywordsToAdd);
+      insertResult = await insertKeywordsBatch(project.bigQueryProjectId, keywordsToAdd);
     } catch (error) {
       console.error('BigQuery insert error:', error);
       return NextResponse.json({
@@ -146,16 +147,23 @@ export async function POST(request: Request) {
       }, { status: 500 });
     }
 
-    // Update cache
-    await incrementKeywordCount(body.projectId, keywordsToAdd.length);
+    // Update cache only for actually inserted keywords
+    if (insertResult.count > 0) {
+      await incrementKeywordCount(body.projectId, insertResult.count);
+    }
 
     return NextResponse.json({ 
-      message: `${keywordsToAdd.length} keywords added successfully`,
-      count: keywordsToAdd.length,
+      message: insertResult.duplicates > 0
+        ? `Đã thêm ${insertResult.count} từ khóa (bỏ qua ${insertResult.duplicates} từ khóa trùng)`
+        : `${insertResult.count} keywords added successfully`,
+      count: insertResult.count,
+      duplicates: insertResult.duplicates,
+      inserted: insertResult.inserted,
+      skipped: insertResult.skipped,
       subscription: {
-        keywordsUsed: keywordCheck.current + keywordsToAdd.length,
+        keywordsUsed: keywordCheck.current + insertResult.count,
         keywordLimit: keywordCheck.limit,
-        remaining: Math.max(0, keywordCheck.remaining - keywordsToAdd.length)
+        remaining: Math.max(0, keywordCheck.remaining - insertResult.count)
       }
     });
   } catch (error) {
