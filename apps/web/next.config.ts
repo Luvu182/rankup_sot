@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
 	typedRoutes: true,
-	reactStrictMode: false, // Disable for development testing
+	reactStrictMode: true, // Keep enabled for better development experience
 };
 
 export default nextConfig;
