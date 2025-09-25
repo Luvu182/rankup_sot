@@ -91,11 +91,6 @@ export function ProjectSwitcher({ className }: ProjectSwitcherProps) {
               <>
                 <div className="w-2 h-2 rounded-full bg-green-500" />
                 <span className="truncate">{currentProject.name}</span>
-                {!currentProject.domainVerified && (
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                    Unverified
-                  </Badge>
-                )}
               </>
             ) : (
               <span className="text-white/50">Select a project</span>
@@ -104,24 +99,21 @@ export function ProjectSwitcher({ className }: ProjectSwitcherProps) {
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[240px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Search projects..." />
+      <PopoverContent className="w-[240px] p-0 bg-black/95 backdrop-blur-xl border-white/10" align="start">
+        <Command className="bg-transparent">
+          <CommandInput placeholder="Tìm kiếm dự án..." className="h-9" />
           <CommandList>
             <CommandGroup>
               {projects.map((project) => (
-                <CommandItem
+                <div
                   key={project._id}
-                  value={project.name}
-                  onSelect={() => handleProjectSelect(project._id)}
+                  onClick={() => handleProjectSelect(project._id)}
+                  className="relative flex items-center px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-white/10 hover:text-white select-none outline-none transition-colors"
+                  role="option"
+                  aria-selected={currentProject?._id === project._id}
                 >
                   <div className="flex items-center gap-2 flex-1">
-                    <div
-                      className={cn(
-                        "w-2 h-2 rounded-full",
-                        project.domainVerified ? "bg-green-500" : "bg-yellow-500"
-                      )}
-                    />
+                    <div className="w-2 h-2 rounded-full bg-green-500" />
                     <div className="flex-1 truncate">
                       <p className="text-sm font-medium truncate">
                         {project.name}
@@ -134,7 +126,7 @@ export function ProjectSwitcher({ className }: ProjectSwitcherProps) {
                       <Check className="ml-auto h-4 w-4" />
                     )}
                   </div>
-                </CommandItem>
+                </div>
               ))}
             </CommandGroup>
             <CommandSeparator />
@@ -162,7 +154,7 @@ export function ProjectSwitcher({ className }: ProjectSwitcherProps) {
                       router.push(`/projects/${currentProject._id}/settings`);
                     }
                   }}
-                  className="relative flex items-center px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground select-none outline-none"
+                  className="relative flex items-center px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-white/10 hover:text-white select-none outline-none transition-colors"
                   role="option"
                   aria-selected="false"
                 >

@@ -14,7 +14,8 @@ import {
   Users,
   BellRing,
   ChevronRight,
-  FolderOpen
+  FolderOpen,
+  Database
 } from "lucide-react";
 import { ProjectSwitcher } from "@/components/projects/project-switcher";
 
@@ -60,6 +61,12 @@ const navigation = [
     href: "/competitors",
     icon: Users,
     description: "Competitor analysis"
+  },
+  {
+    name: "Debug",
+    href: "/debug",
+    icon: Database,
+    description: "BigQuery debug"
   }
 ];
 

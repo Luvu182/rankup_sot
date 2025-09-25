@@ -65,6 +65,34 @@ export const getProject = query({
   },
 });
 
+// Safe version of getProject that returns null instead of throwing
+export const getProjectSafe = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return null;
+    }
+
+    const project = await ctx.db.get(args.projectId);
+    if (!project) {
+      return null;
+    }
+
+    // Check if user has access to this project
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk", (q) => q.eq("clerkId", identity.subject))
+      .unique();
+
+    if (!user || project.userId !== user._id) {
+      return null;
+    }
+
+    return project;
+  },
+});
+
 // Create a new project
 export const createProject = mutation({
   args: {
@@ -134,6 +162,8 @@ export const createProject = mutation({
       domain: args.domain,
       isPublic: args.isPublic ?? false,
       bigQueryProjectId,
+      syncStatus: "pending",
+      syncRetryCount: 0,
       settings: {
         timezone: args.settings?.timezone ?? "UTC",
         currency: args.settings?.currency ?? "USD",
@@ -148,8 +178,6 @@ export const createProject = mutation({
           webhook: args.settings?.notificationSettings?.webhook,
         },
       },
-      domainVerified: false,
-      domainVerificationCode: `rankup-verify-${Math.random().toString(36).substring(2, 15)}`,
       cachedStats: {
         totalKeywords: 0,
         avgPosition: 0,
@@ -162,7 +190,13 @@ export const createProject = mutation({
       updatedAt: Date.now(),
     });
 
-    return projectId;
+    // Note: BigQuery sync happens via API call from frontend after project creation
+
+    // Return both IDs for syncing and status updates
+    return {
+      projectId,
+      bigQueryProjectId
+    };
   },
 });
 
@@ -234,11 +268,7 @@ export const updateProject = mutation({
         throw new Error("Project with this domain already exists");
       }
 
-      // Reset domain verification if domain changed
-      await ctx.db.patch(args.projectId, {
-        domainVerified: false,
-        domainVerificationCode: `rankup-verify-${Math.random().toString(36).substring(2, 15)}`,
-      });
+      // Domain changed - no verification needed
     }
 
     // Merge settings if provided
@@ -291,54 +321,15 @@ export const deleteProject = mutation({
       throw new Error("Unauthorized");
     }
 
-    // TODO: Delete associated data in BigQuery
-    // TODO: Delete associated keywords, rankings, etc.
+    // Delete from BigQuery first via API
+    // Note: We can't directly import BigQuery client in Convex functions
+    // because they run in a special environment without Node.js modules
+    
+    // We'll handle BigQuery deletion from the frontend after Convex deletion
+    // to avoid complications with the Convex runtime environment
 
+    // Delete from Convex
     await ctx.db.delete(args.projectId);
-  },
-});
-
-// Verify domain ownership
-export const verifyDomain = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not authenticated");
-    }
-
-    const project = await ctx.db.get(args.projectId);
-    if (!project) {
-      throw new Error("Project not found");
-    }
-
-    // Check if user has access to this project
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk", (q) => q.eq("clerkId", identity.subject))
-      .unique();
-
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    if (project.userId !== user._id) {
-      throw new Error("Unauthorized");
-    }
-
-    // TODO: Implement actual domain verification
-    // This would typically involve:
-    // 1. DNS TXT record verification
-    // 2. HTML meta tag verification
-    // 3. File upload verification
-    // For now, we'll just mark it as verified
-
-    await ctx.db.patch(args.projectId, {
-      domainVerified: true,
-      updatedAt: Date.now(),
-    });
-
-    return { verified: true };
   },
 });
 
@@ -383,53 +374,84 @@ export const updateBigQueryProjectId = mutation({
   },
 });
 
-// Get domain verification code
-export const getDomainVerificationCode = query({
-  args: { projectId: v.id("projects") },
+// Update project sync status
+export const updateSyncStatus = mutation({
+  args: {
+    projectId: v.id("projects"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("syncing"), 
+      v.literal("synced"),
+      v.literal("failed")
+    ),
+    error: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");
     }
 
+    // Get the project to verify ownership
     const project = await ctx.db.get(args.projectId);
     if (!project) {
       throw new Error("Project not found");
     }
 
-    // Check if user has access to this project
     const user = await ctx.db
       .query("users")
       .withIndex("by_clerk", (q) => q.eq("clerkId", identity.subject))
       .unique();
 
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    if (project.userId !== user._id) {
+    if (!user || project.userId !== user._id) {
       throw new Error("Unauthorized");
     }
 
-    return {
-      verificationCode: project.domainVerificationCode,
-      methods: [
-        {
-          type: "dns",
-          record: "TXT",
-          name: "_rankup-verify",
-          value: project.domainVerificationCode,
-        },
-        {
-          type: "meta",
-          tag: `<meta name="rankup-verification" content="${project.domainVerificationCode}" />`,
-        },
-        {
-          type: "file",
-          path: `/rankup-verify-${project.domainVerificationCode}.txt`,
-          content: project.domainVerificationCode,
-        },
-      ],
+    const updateData: any = {
+      syncStatus: args.status,
+      updatedAt: Date.now(),
     };
+
+    if (args.status === "failed") {
+      updateData.syncError = args.error;
+      updateData.syncRetryCount = ((project.syncRetryCount as number | undefined) || 0) + 1;
+    } else if (args.status === "synced") {
+      updateData.syncError = undefined;
+      updateData.syncRetryCount = 0;
+    }
+
+    await ctx.db.patch(args.projectId, updateData);
+
+    // Create notification for user
+    if (args.status === "synced") {
+      await ctx.db.insert("notifications", {
+        userId: identity.subject,
+        projectId: args.projectId,
+        type: "system",
+        severity: "info",
+        title: "Project khởi tạo thành công",
+        message: `Dự án ${project.name} đã được khởi tạo và sẵn sàng sử dụng.`,
+        isRead: false,
+        isArchived: false,
+        createdAt: Date.now(),
+      });
+    } else if (args.status === "failed" && ((project.syncRetryCount as number | undefined) || 0) >= 2) {
+      await ctx.db.insert("notifications", {
+        userId: identity.subject,
+        projectId: args.projectId,
+        type: "system",
+        severity: "error",
+        title: "Lỗi khởi tạo dự án",
+        message: `Không thể khởi tạo dự án ${project.name}. Vui lòng liên hệ admin để được hỗ trợ.`,
+        data: { error: args.error },
+        isRead: false,
+        isArchived: false,
+        createdAt: Date.now(),
+      });
+    }
+
+    return { success: true };
   },
 });
+
+

@@ -23,10 +23,17 @@ export interface RankingData {
   position: number | null;
   url: string | null;
   title: string | null;
+  snippet?: string | null;
   tracked_date: string;
   tracked_timestamp: string;
   search_engine: string;
   device: string;
+  location_code?: string;
+  language_code?: string;
+  featured_snippet?: boolean;
+  knowledge_panel?: boolean;
+  site_links?: boolean;
+  competitor_domains?: string[];
 }
 
 export interface KeywordData {
@@ -436,9 +443,9 @@ export async function createProjectInBigQuery(
         @domain as domain,
         true as tracking_enabled,
         STRUCT(
-          true as email_notifications_enabled,
-          'weekly' as frequency,
-          ARRAY<STRING>[] as email_list
+          true as email_alerts,
+          10 as position_drop_threshold,
+          true as new_competitor_alerts
         ) as notification_settings,
         CURRENT_TIMESTAMP() as created_at,
         CURRENT_TIMESTAMP() as updated_at
@@ -463,18 +470,163 @@ export async function createProjectInBigQuery(
   };
 
   try {
-    await bigquery.query({
+    console.log('[BigQuery] Creating/updating project with MERGE:', { projectId, userId, name, domain });
+    const [job] = await bigquery.query({
       query,
       params,
     });
+    console.log('[BigQuery] MERGE operation completed successfully for project:', projectId);
     return { success: true };
   } catch (error) {
-    console.error('Error creating project in BigQuery:', error);
+    console.error('[BigQuery] Error creating project:', error);
     throw error;
   }
 }
 
 // Insert keywords batch
+// Delete project and all associated data from BigQuery
+export async function deleteProjectFromBigQuery(
+  projectId: string,
+  userId: string
+) {
+  try {
+    // Delete rankings first (foreign key constraint)
+    const deleteRankingsQuery = `
+      DELETE FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.rankings\`
+      WHERE project_id = @projectId
+        AND EXISTS (
+          SELECT 1 FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.projects\` p
+          WHERE p.project_id = @projectId AND p.user_id = @userId
+        )
+    `;
+    
+    await bigquery.query({
+      query: deleteRankingsQuery,
+      params: { projectId, userId }
+    });
+    
+    // Delete keywords
+    const deleteKeywordsQuery = `
+      DELETE FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\`
+      WHERE project_id = @projectId
+        AND EXISTS (
+          SELECT 1 FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.projects\` p
+          WHERE p.project_id = @projectId AND p.user_id = @userId
+        )
+    `;
+    
+    await bigquery.query({
+      query: deleteKeywordsQuery,
+      params: { projectId, userId }
+    });
+    
+    // Finally delete the project
+    const deleteProjectQuery = `
+      DELETE FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.projects\`
+      WHERE project_id = @projectId AND user_id = @userId
+    `;
+    
+    await bigquery.query({
+      query: deleteProjectQuery,
+      params: { projectId, userId }
+    });
+    
+    console.log(`[BigQuery] Deleted project ${projectId} and all associated data`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting project from BigQuery:', error);
+    throw error;
+  }
+}
+
+// Debug function to check user projects
+export async function getUserProjectsDebug(userId: string) {
+  try {
+    // Check if tables exist
+    const checkTablesQuery = `
+      SELECT table_name 
+      FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.INFORMATION_SCHEMA.TABLES\`
+      WHERE table_name IN ('projects', 'keywords', 'rankings')
+    `;
+
+    const [tables] = await bigquery.query(checkTablesQuery);
+
+    // Query projects for user
+    const query = `
+      WITH deduped_projects AS (
+        SELECT 
+          project_id,
+          user_id,
+          name,
+          domain,
+          tracking_enabled,
+          created_at,
+          updated_at,
+          ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at DESC) as rn
+        FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.projects\`
+        WHERE user_id = @userId
+      )
+      SELECT 
+        project_id,
+        user_id,
+        name,
+        domain,
+        tracking_enabled,
+        created_at,
+        updated_at
+      FROM deduped_projects
+      WHERE rn = 1
+      ORDER BY created_at DESC
+    `;
+
+    const [projects] = await bigquery.query({
+      query,
+      params: { userId }
+    });
+
+    // Get keyword count per project
+    const keywordsQuery = `
+      SELECT 
+        p.project_id,
+        p.name,
+        COUNT(k.keyword_id) as keyword_count
+      FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.projects\` p
+      LEFT JOIN \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\` k
+        ON p.project_id = k.project_id
+      WHERE p.user_id = @userId
+      GROUP BY p.project_id, p.name
+    `;
+
+    const [projectStats] = await bigquery.query({
+      query: keywordsQuery,
+      params: { userId }
+    });
+
+    return {
+      success: true,
+      tables: tables.map((t: any) => t.table_name),
+      projects,
+      projectStats,
+      totalProjects: projects.length
+    };
+  } catch (error: any) {
+    console.error('BigQuery debug error:', error);
+    
+    if (error.message?.includes('Not found: Table')) {
+      return {
+        success: false,
+        error: 'Tables not found',
+        message: 'BigQuery tables do not exist. Run schema creation script.'
+      };
+    }
+    
+    return {
+      success: false,
+      error: error.message || 'Unknown error'
+    };
+  }
+}
+
 export async function insertKeywordsBatch(
   projectId: string,
   keywords: Array<{
@@ -508,6 +660,95 @@ export async function insertKeywordsBatch(
     return { success: true, count: rows.length };
   } catch (error) {
     console.error('Error inserting keywords:', error);
+    throw error;
+  }
+}
+
+// Delete a keyword
+export async function deleteKeyword(keywordId: string, projectId: string) {
+  const query = `
+    DELETE FROM \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\`
+    WHERE keyword_id = @keywordId 
+      AND project_id = @projectId
+  `;
+  
+  const params = {
+    keywordId,
+    projectId
+  };
+  
+  try {
+    await bigquery.query({
+      query,
+      params,
+    });
+    console.log(`Deleted keyword ${keywordId}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting keyword:', error);
+    throw error;
+  }
+}
+
+// Update a keyword
+export async function updateKeyword(
+  keywordId: string,
+  projectId: string,
+  updates: {
+    keyword?: string;
+    target_position?: number;
+    priority?: string;
+    category?: string;
+    target_url?: string;
+    is_active?: boolean;
+  }
+) {
+  const setStatements = [];
+  const params: any = { keywordId, projectId };
+  
+  if (updates.keyword !== undefined) {
+    setStatements.push('keyword = @keyword');
+    params.keyword = updates.keyword;
+  }
+  if (updates.target_position !== undefined) {
+    setStatements.push('target_position = @target_position');
+    params.target_position = updates.target_position;
+  }
+  if (updates.priority !== undefined) {
+    setStatements.push('priority = @priority');
+    params.priority = updates.priority;
+  }
+  if (updates.category !== undefined) {
+    setStatements.push('category = @category');
+    params.category = updates.category;
+  }
+  if (updates.target_url !== undefined) {
+    setStatements.push('target_url = @target_url');
+    params.target_url = updates.target_url;
+  }
+  if (updates.is_active !== undefined) {
+    setStatements.push('is_active = @is_active');
+    params.is_active = updates.is_active;
+  }
+  
+  setStatements.push('updated_at = CURRENT_TIMESTAMP()');
+  
+  const query = `
+    UPDATE \`${process.env.GOOGLE_CLOUD_PROJECT}.seo_rankings.keywords\`
+    SET ${setStatements.join(', ')}
+    WHERE keyword_id = @keywordId 
+      AND project_id = @projectId
+  `;
+  
+  try {
+    await bigquery.query({
+      query,
+      params,
+    });
+    console.log(`Updated keyword ${keywordId}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating keyword:', error);
     throw error;
   }
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getKeywords } from "@Rankup-manager/backend/lib/bigquery-client";
+import { getKeywords, insertKeywordsBatch, deleteKeyword } from "@Rankup-manager/backend/lib/bigquery-client";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@Rankup-manager/backend/convex/_generated/api";
 import { Id } from "@Rankup-manager/backend/convex/_generated/dataModel";
@@ -135,8 +135,16 @@ export async function POST(request: Request) {
       }, { status: 402 });
     }
 
-    // TODO: Insert keywords into BigQuery
-    // const inserted = await insertKeywords(project.bigQueryProjectId, keywordsToAdd);
+    // Insert keywords into BigQuery
+    try {
+      await insertKeywordsBatch(project.bigQueryProjectId, keywordsToAdd);
+    } catch (error) {
+      console.error('BigQuery insert error:', error);
+      return NextResponse.json({
+        error: 'Failed to insert keywords',
+        message: 'Could not save keywords to database. Please try again.'
+      }, { status: 500 });
+    }
 
     // Update cache
     await incrementKeywordCount(body.projectId, keywordsToAdd.length);
@@ -186,8 +194,16 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // TODO: Delete from BigQuery
-    // await deleteKeyword(keywordId, project.bigQueryProjectId);
+    // Delete from BigQuery
+    try {
+      await deleteKeyword(keywordId, project.bigQueryProjectId);
+    } catch (error) {
+      console.error('BigQuery delete error:', error);
+      return NextResponse.json({
+        error: 'Failed to delete keyword',
+        message: 'Could not delete keyword from database. Please try again.'
+      }, { status: 500 });
+    }
 
     // Note: We don't decrement keyword count cache here
     // It's safer to let it expire and recount

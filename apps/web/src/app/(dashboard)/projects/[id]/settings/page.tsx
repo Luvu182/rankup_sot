@@ -1,18 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@Rankup-manager/backend/convex/_generated/api";
 import type { Id } from "@Rankup-manager/backend/convex/_generated/dataModel";
 import {
   ArrowLeft,
-  CheckCircle,
   Globe,
   Loader2,
   Shield,
   Trash2,
-  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,26 +39,65 @@ export default function ProjectSettingsPage() {
   const { toast } = useToast();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [hasChecked, setHasChecked] = useState(false);
 
   const projectId = params.id as Id<"projects">;
   
-  // Fetch project data
-  const project = useQuery(api.projects.getProject, { projectId });
+  // Fetch project data - using safe version that returns null instead of throwing
+  const project = useQuery(api.projects.getProjectSafe, { projectId });
   const deleteProjectMutation = useMutation(api.projects.deleteProject);
 
+  // Handle project not found
+  useEffect(() => {
+    // Only check after the query has loaded (project !== undefined)
+    if (project === undefined) return;
+    
+    setHasChecked(true);
+    
+    if (!project) {
+      toast({
+        title: "Project không tồn tại",
+        description: "Project này có thể đã bị xóa hoặc bạn không có quyền truy cập.",
+        variant: "destructive",
+      });
+      router.push("/projects");
+    }
+  }, [project, router, toast]);
+
   const handleDeleteProject = async () => {
+    if (!project) return;
+    
     setIsDeleting(true);
     try {
+      // Delete from BigQuery first
+      try {
+        const bigQueryResponse = await fetch('/api/projects/delete-bigquery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: project.bigQueryProjectId,
+          }),
+        });
+        
+        if (!bigQueryResponse.ok) {
+          console.error('BigQuery deletion failed:', await bigQueryResponse.text());
+        }
+      } catch (error) {
+        console.error('BigQuery deletion error:', error);
+      }
+      
+      // Delete from Convex
       await deleteProjectMutation({ projectId });
+      
       toast({
-        title: "Project deleted",
-        description: "Your project has been deleted successfully.",
+        title: "Project đã xóa thành công",
+        description: `Dự án "${project.name}" đã được xóa khỏi hệ thống.`,
       });
       router.push("/projects");
     } catch (error) {
       toast({
-        title: "Error",
-        description: "Failed to delete project. Please try again.",
+        title: "Lỗi xóa project",
+        description: "Không thể xóa project. Vui lòng thử lại.",
         variant: "destructive",
       });
     } finally {
@@ -76,6 +113,18 @@ export default function ProjectSettingsPage() {
     });
   };
 
+  // Show loading while query is loading or we haven't checked yet
+  if (project === undefined || (!hasChecked && !project)) {
+    return (
+      <div className="container mx-auto py-8">
+        <div className="flex items-center justify-center h-96">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  // If project is null and we've checked, the useEffect will redirect
   if (!project) {
     return (
       <div className="container mx-auto py-8">
@@ -120,20 +169,9 @@ export default function ProjectSettingsPage() {
                 Domain
               </CardTitle>
               <CardDescription>
-                Your project's domain and verification status
+                Your project's domain
               </CardDescription>
             </div>
-            {project.domainVerified ? (
-              <Badge variant="default" className="bg-green-600">
-                <CheckCircle className="mr-1 h-3 w-3" />
-                Verified
-              </Badge>
-            ) : (
-              <Badge variant="secondary">
-                <AlertCircle className="mr-1 h-3 w-3" />
-                Unverified
-              </Badge>
-            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -141,18 +179,9 @@ export default function ProjectSettingsPage() {
             <div>
               <p className="font-medium">{project.domain}</p>
               <p className="text-sm text-muted-foreground mt-1">
-                {project.domainVerified
-                  ? "Domain ownership has been verified"
-                  : "Domain ownership needs to be verified to unlock all features"}
+                Your website domain for SEO tracking
               </p>
             </div>
-            {!project.domainVerified && (
-              <Button
-                onClick={() => router.push(`/projects/${projectId}/verify-domain`)}
-              >
-                Verify Domain
-              </Button>
-            )}
           </div>
         </CardContent>
       </Card>

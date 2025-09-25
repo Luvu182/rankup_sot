@@ -65,6 +65,14 @@ export default defineSchema({
     domain: v.string(),
     isPublic: v.boolean(),
     bigQueryProjectId: v.string(), // Reference to BigQuery project_id in tables
+    syncStatus: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("syncing"),
+      v.literal("synced"),
+      v.literal("failed")
+    )),
+    syncError: v.optional(v.string()),
+    syncRetryCount: v.optional(v.number()),
     settings: v.object({
       timezone: v.string(),
       currency: v.string(),
@@ -79,8 +87,6 @@ export default defineSchema({
         webhook: v.optional(v.string()),
       }),
     }),
-    domainVerified: v.boolean(),
-    domainVerificationCode: v.string(),
     // Cached stats từ BigQuery (update định kỳ)
     cachedStats: v.object({
       totalKeywords: v.number(),

@@ -31,6 +31,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { ProjectSyncModal } from "./project-sync-modal";
 
 const projectFormSchema = z.object({
   name: z.string().min(1, "Project name is required").max(100),
@@ -72,36 +73,47 @@ interface ProjectFormProps {
 }
 
 const timezones = [
-  { value: "UTC", label: "UTC" },
-  { value: "America/New_York", label: "Eastern Time (ET)" },
-  { value: "America/Chicago", label: "Central Time (CT)" },
-  { value: "America/Denver", label: "Mountain Time (MT)" },
-  { value: "America/Los_Angeles", label: "Pacific Time (PT)" },
-  { value: "Europe/London", label: "London (GMT)" },
-  { value: "Europe/Paris", label: "Central European Time (CET)" },
-  { value: "Asia/Tokyo", label: "Japan Standard Time (JST)" },
-  { value: "Australia/Sydney", label: "Australian Eastern Time (AET)" },
+  { value: "Asia/Ho_Chi_Minh", label: "Vietnam (UTC+7) - Hồ Chí Minh, Hà Nội 🇻🇳" },
+  { value: "Asia/Bangkok", label: "Thailand (UTC+7) - Bangkok 🇹🇭" },
+  { value: "Asia/Jakarta", label: "Indonesia WIB (UTC+7) - Jakarta 🇮🇩" },
+  { value: "Asia/Singapore", label: "Singapore (UTC+8) - Singapore 🇸🇬" },
+  { value: "Asia/Manila", label: "Philippines (UTC+8) - Manila 🇵🇭" },
+  { value: "Asia/Kuala_Lumpur", label: "Malaysia (UTC+8) - Kuala Lumpur 🇲🇾" },
+  { value: "Asia/Tokyo", label: "Japan (UTC+9) - Tokyo, Osaka 🇯🇵" },
+  { value: "Asia/Seoul", label: "South Korea (UTC+9) - Seoul 🇰🇷" },
+  { value: "America/New_York", label: "US Eastern (UTC-5/-4) - New York 🇺🇸" },
+  { value: "America/Los_Angeles", label: "US Pacific (UTC-8/-7) - Los Angeles 🇺🇸" },
+  { value: "Europe/London", label: "UK (UTC+0/+1) - London 🇬🇧" },
+  { value: "Europe/Paris", label: "France (UTC+1/+2) - Paris 🇫🇷" },
+  { value: "Australia/Sydney", label: "Australia Eastern (UTC+10/+11) - Sydney 🇦🇺" },
+  { value: "UTC", label: "UTC (Coordinated Universal Time)" },
 ];
 
 const currencies = [
-  { value: "USD", label: "US Dollar ($)" },
-  { value: "EUR", label: "Euro (€)" },
-  { value: "GBP", label: "British Pound (£)" },
-  { value: "JPY", label: "Japanese Yen (¥)" },
-  { value: "AUD", label: "Australian Dollar (A$)" },
-  { value: "CAD", label: "Canadian Dollar (C$)" },
+  { value: "VND", label: "Việt Nam Đồng (₫) 🇻🇳" },
+  { value: "USD", label: "US Dollar ($) 🇺🇸" },
+  { value: "EUR", label: "Euro (€) 🇪🇺" },
+  { value: "GBP", label: "British Pound (£) 🇬🇧" },
+  { value: "JPY", label: "Japanese Yen (¥) 🇯🇵" },
+  { value: "SGD", label: "Singapore Dollar (S$) 🇸🇬" },
+  { value: "THB", label: "Thai Baht (฿) 🇹🇭" },
+  { value: "AUD", label: "Australian Dollar (A$) 🇦🇺" },
+  { value: "CAD", label: "Canadian Dollar (C$) 🇨🇦" },
 ];
 
 const languages = [
-  { value: "en", label: "English" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "zh", label: "Chinese" },
+  { value: "vi", label: "Tiếng Việt 🇻🇳" },
+  { value: "en", label: "English 🇬🇧" },
+  { value: "es", label: "Spanish 🇪🇸" },
+  { value: "fr", label: "French 🇫🇷" },
+  { value: "de", label: "German 🇩🇪" },
+  { value: "it", label: "Italian 🇮🇹" },
+  { value: "pt", label: "Portuguese 🇵🇹" },
+  { value: "ja", label: "Japanese 🇯🇵" },
+  { value: "ko", label: "Korean 🇰🇷" },
+  { value: "zh", label: "Chinese 🇨🇳" },
+  { value: "th", label: "Thai 🇹🇭" },
+  { value: "id", label: "Indonesian 🇮🇩" },
 ];
 
 const searchEngines = [
@@ -113,27 +125,41 @@ const searchEngines = [
 ];
 
 const locations = [
-  "United States",
-  "United Kingdom",
-  "Canada",
-  "Australia",
-  "Germany",
-  "France",
-  "Spain",
-  "Italy",
-  "Japan",
-  "Brazil",
-  "Mexico",
-  "India",
-  "China",
-  "Russia",
-  "South Korea",
+  { value: "Vietnam", label: "Vietnam 🇻🇳" },
+  { value: "United States", label: "United States 🇺🇸" },
+  { value: "United Kingdom", label: "United Kingdom 🇬🇧" },
+  { value: "Canada", label: "Canada 🇨🇦" },
+  { value: "Australia", label: "Australia 🇦🇺" },
+  { value: "Singapore", label: "Singapore 🇸🇬" },
+  { value: "Thailand", label: "Thailand 🇹🇭" },
+  { value: "Japan", label: "Japan 🇯🇵" },
+  { value: "South Korea", label: "South Korea 🇰🇷" },
+  { value: "Germany", label: "Germany 🇩🇪" },
+  { value: "France", label: "France 🇫🇷" },
+  { value: "Netherlands", label: "Netherlands 🇳🇱" },
+  { value: "Spain", label: "Spain 🇪🇸" },
+  { value: "Italy", label: "Italy 🇮🇹" },
+  { value: "Brazil", label: "Brazil 🇧🇷" },
+  { value: "Mexico", label: "Mexico 🇲🇽" },
+  { value: "India", label: "India 🇮🇳" },
+  { value: "China", label: "China 🇨🇳" },
+  { value: "Russia", label: "Russia 🇷🇺" },
+  { value: "Indonesia", label: "Indonesia 🇮🇩" },
+  { value: "Malaysia", label: "Malaysia 🇲🇾" },
+  { value: "Philippines", label: "Philippines 🇵🇭" },
 ];
 
 export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [competitorInput, setCompetitorInput] = useState("");
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [newProjectData, setNewProjectData] = useState<{
+    projectId: string;
+    bigQueryProjectId: string;
+    name: string;
+    domain: string;
+  } | null>(null);
 
   const createProjectMutation = useMutation(api.projects.createProject);
   const updateProjectMutation = useMutation(api.projects.updateProject);
@@ -152,10 +178,10 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
           domain: "",
           isPublic: false,
           settings: {
-            timezone: "UTC",
-            currency: "USD",
-            language: "en",
-            locations: ["United States"],
+            timezone: "Asia/Ho_Chi_Minh",
+            currency: "VND",
+            language: "vi",
+            locations: ["Vietnam"],
             searchEngines: ["google"],
             trackingFrequency: "daily",
             competitorDomains: [],
@@ -180,11 +206,16 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
           description: "Your project settings have been saved.",
         });
       } else {
-        await createProjectMutation(values);
-        toast({
-          title: "Project created",
-          description: "Your new project has been created successfully.",
+        const result = await createProjectMutation(values);
+        
+        // Show sync modal
+        setNewProjectData({
+          projectId: result.projectId,
+          bigQueryProjectId: result.bigQueryProjectId,
+          name: values.name,
+          domain: values.domain,
         });
+        setSyncModalOpen(true);
       }
       onSuccess?.();
     } catch (error) {
@@ -225,8 +256,9 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
   };
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+    <>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
         <Tabs defaultValue="general" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="general">General</TabsTrigger>
@@ -240,7 +272,7 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Project Name</FormLabel>
+                  <FormLabel>Project Name <span className="text-red-500">*</span></FormLabel>
                   <FormControl>
                     <Input
                       placeholder="My Website SEO"
@@ -261,7 +293,7 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
               name="domain"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Domain</FormLabel>
+                  <FormLabel>Domain <span className="text-red-500">*</span></FormLabel>
                   <FormControl>
                     <div className="relative">
                       <Globe className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -432,76 +464,31 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
 
             <FormField
               control={form.control}
-              name="settings.searchEngines"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Search Engines</FormLabel>
-                  <FormDescription>
-                    Select which search engines to track rankings on.
-                  </FormDescription>
-                  <div className="space-y-2 mt-2">
-                    {searchEngines.map((engine) => (
-                      <div
-                        key={engine.value}
-                        className="flex items-center space-x-2"
-                      >
-                        <Checkbox
-                          checked={field.value.includes(engine.value)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              field.onChange([...field.value, engine.value]);
-                            } else {
-                              field.onChange(
-                                field.value.filter((v) => v !== engine.value)
-                              );
-                            }
-                          }}
-                          disabled={isLoading}
-                        />
-                        <Label className="flex items-center gap-2 cursor-pointer">
-                          <span>{engine.icon}</span>
-                          {engine.label}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
               name="settings.locations"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Tracking Locations</FormLabel>
+                  <FormLabel>Tracking Location</FormLabel>
+                  <Select
+                    onValueChange={(value) => field.onChange([value])}
+                    defaultValue={field.value[0]}
+                    disabled={isLoading}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a location" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {locations.map((location) => (
+                        <SelectItem key={location.value} value={location.value}>
+                          {location.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FormDescription>
-                    Select locations to track rankings from.
+                    Select the primary location to track rankings from.
                   </FormDescription>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    {locations.map((location) => (
-                      <div
-                        key={location}
-                        className="flex items-center space-x-2"
-                      >
-                        <Checkbox
-                          checked={field.value.includes(location)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              field.onChange([...field.value, location]);
-                            } else {
-                              field.onChange(
-                                field.value.filter((v) => v !== location)
-                              );
-                            }
-                          }}
-                          disabled={isLoading}
-                        />
-                        <Label className="cursor-pointer">{location}</Label>
-                      </div>
-                    ))}
-                  </div>
                   <FormMessage />
                 </FormItem>
               )}
@@ -584,5 +571,21 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
         </div>
       </form>
     </Form>
+
+    {/* Sync Modal */}
+    {newProjectData && (
+      <ProjectSyncModal
+        open={syncModalOpen}
+        projectId={newProjectData.projectId as any}
+        bigQueryProjectId={newProjectData.bigQueryProjectId}
+        projectName={newProjectData.name}
+        projectDomain={newProjectData.domain}
+        onClose={() => {
+          setSyncModalOpen(false);
+          onSuccess?.();
+        }}
+      />
+    )}
+    </>
   );
 }

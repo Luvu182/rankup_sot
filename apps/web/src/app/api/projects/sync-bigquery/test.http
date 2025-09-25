@@ -1,0 +1,45 @@
+### Test BigQuery Sync API
+### This file demonstrates how to test the improved sync API with idempotency
+
+### Test 1: Normal sync request
+POST http://localhost:3001/api/projects/sync-bigquery
+Content-Type: application/json
+
+{
+  "projectId": "test-project-123",
+  "name": "Test Project",
+  "domain": "example.com"
+}
+
+### Test 2: Sync with idempotency key
+POST http://localhost:3001/api/projects/sync-bigquery
+Content-Type: application/json
+
+{
+  "projectId": "test-project-123",
+  "name": "Test Project",
+  "domain": "example.com",
+  "idempotencyKey": "unique-key-12345"
+}
+
+### Test 3: Duplicate request (should return 409)
+POST http://localhost:3001/api/projects/sync-bigquery
+Content-Type: application/json
+
+{
+  "projectId": "test-project-123",
+  "name": "Test Project",
+  "domain": "example.com",
+  "idempotencyKey": "unique-key-12345"
+}
+
+### Test 4: Missing required fields (should return 400)
+POST http://localhost:3001/api/projects/sync-bigquery
+Content-Type: application/json
+
+{
+  "projectId": "test-project-123"
+}
+
+### Test 5: Health check
+GET http://localhost:3001/api/projects/sync-bigquery

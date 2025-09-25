@@ -1,217 +1,405 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import * as Dialog from "@radix-ui/react-dialog";
-import GlassButton from "@/components/ui/glass-button";
-import { Upload, X, FileText, AlertCircle } from "lucide-react";
+import { useState, useCallback } from "react";
+import { useDropzone } from "react-dropzone";
+import { Loader2, Upload, FileText, AlertCircle, Check, Download } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useToast } from "@/hooks/use-toast";
+import { Progress } from "@/components/ui/progress";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-interface ImportKeywordsModalProps {
-  projectId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSuccess?: (count: number) => void;
+interface ParsedKeyword {
+  keyword: string;
+  target_position?: number;
+  priority?: string;
+  category?: string;
+  target_url?: string;
 }
 
-export default function ImportKeywordsModal({
-  projectId,
-  open,
-  onOpenChange,
-  onSuccess
-}: ImportKeywordsModalProps) {
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface ImportKeywordsModalProps {
+  open: boolean;
+  onClose: () => void;
+  projectId: string;
+  onSuccess?: () => void;
+}
+
+export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: ImportKeywordsModalProps) {
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [manualKeywords, setManualKeywords] = useState("");
-  const [importType, setImportType] = useState<"file" | "manual">("file");
+  const [parsedData, setParsedData] = useState<ParsedKeyword[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      const csvFile = acceptedFiles[0];
+      setFile(csvFile);
+      parseCSV(csvFile);
+    }
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'text/csv': ['.csv'],
+      'application/vnd.ms-excel': ['.xls'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+    },
+    multiple: false,
+  });
+
+  const parseCSV = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        // Parse CSV with proper quote handling
+        const parseCSVLine = (line: string) => {
+          const result = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            
+            if (char === '"') {
+              inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+              result.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          
+          result.push(current.trim());
+          return result;
+        };
+        
+        const headers = parseCSVLine(lines[0].toLowerCase());
+        
+        // Validate headers
+        if (!headers.includes('keyword') && !headers.includes('từ khóa')) {
+          setErrors(['File CSV phải có cột "keyword" hoặc "từ khóa"']);
+          return;
+        }
+
+        const data: ParsedKeyword[] = [];
+        const parseErrors: string[] = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const values = parseCSVLine(lines[i]);
+          const keywordIndex = headers.indexOf('keyword') >= 0 ? headers.indexOf('keyword') : headers.indexOf('từ khóa');
+          
+          if (!values[keywordIndex]) {
+            parseErrors.push(`Dòng ${i + 1}: Thiếu từ khóa`);
+            continue;
+          }
+
+          const keyword: ParsedKeyword = {
+            keyword: values[keywordIndex].replace(/^"+|"+$/g, ''), // Remove extra quotes
+          };
+
+          // Map other fields
+          const targetPosIndex = headers.indexOf('target_position') >= 0 ? headers.indexOf('target_position') : headers.indexOf('vị trí mục tiêu');
+          if (targetPosIndex >= 0 && values[targetPosIndex]) {
+            keyword.target_position = parseInt(values[targetPosIndex]) || 3;
+          }
+
+          const priorityIndex = headers.indexOf('priority') >= 0 ? headers.indexOf('priority') : headers.indexOf('độ ưu tiên');
+          if (priorityIndex >= 0 && values[priorityIndex]) {
+            const priority = values[priorityIndex].toLowerCase();
+            if (['high', 'medium', 'low', 'cao', 'trung bình', 'thấp'].includes(priority)) {
+              keyword.priority = priority === 'cao' ? 'high' : priority === 'trung bình' ? 'medium' : priority === 'thấp' ? 'low' : priority;
+            }
+          }
+
+          const categoryIndex = headers.indexOf('category') >= 0 ? headers.indexOf('category') : headers.indexOf('danh mục');
+          if (categoryIndex >= 0 && values[categoryIndex]) {
+            keyword.category = values[categoryIndex].replace(/^"+|"+$/g, '');
+          }
+
+          const urlIndex = headers.indexOf('target_url') >= 0 ? headers.indexOf('target_url') : headers.indexOf('url mục tiêu');
+          if (urlIndex >= 0 && values[urlIndex]) {
+            keyword.target_url = values[urlIndex].replace(/^"+|"+$/g, '');
+          }
+
+          data.push(keyword);
+        }
+
+        setParsedData(data);
+        setErrors(parseErrors);
+        
+        if (data.length === 0) {
+          setErrors(['Không tìm thấy từ khóa nào trong file']);
+        }
+      } catch (error) {
+        setErrors(['Lỗi khi đọc file. Vui lòng kiểm tra định dạng file CSV']);
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
 
   const handleImport = async () => {
-    setLoading(true);
-    setError(null);
+    if (parsedData.length === 0) return;
 
+    setIsLoading(true);
+    setUploadProgress(0);
+    
     try {
-      const formData = new FormData();
-      formData.append("projectId", projectId);
-
-      if (importType === "file") {
-        if (!file) {
-          setError("Please select a file");
-          setLoading(false);
-          return;
-        }
-        
-        formData.append("source", file.type.includes("csv") ? "csv" : "json");
-        formData.append("file", file);
-      } else {
-        if (!manualKeywords.trim()) {
-          setError("Please enter keywords");
-          setLoading(false);
-          return;
-        }
-        
-        formData.append("source", "manual");
-        formData.append("keywords", manualKeywords);
+      const batchSize = 50;
+      const batches = [];
+      
+      for (let i = 0; i < parsedData.length; i += batchSize) {
+        batches.push(parsedData.slice(i, i + batchSize));
       }
 
-      const response = await fetch("/api/keywords/import", {
-        method: "POST",
-        body: formData
+      let processed = 0;
+      for (const batch of batches) {
+        const response = await fetch("/api/keywords", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            projectId,
+            keywords: batch,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          if (response.status === 402) {
+            toast({
+              title: "Giới hạn từ khóa",
+              description: data.message,
+              variant: "destructive",
+              action: (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => window.location.href = data.upgrade_url}
+                >
+                  Nâng cấp
+                </Button>
+              ),
+            });
+            break;
+          }
+          throw new Error(data.error || "Failed to import keywords");
+        }
+
+        processed += batch.length;
+        setUploadProgress((processed / parsedData.length) * 100);
+      }
+
+      toast({
+        title: "Import thành công!",
+        description: `Đã import ${processed} từ khóa`,
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 402) {
-          setError(data.message || "Subscription limit reached");
-          setTimeout(() => {
-            router.push("/settings/billing");
-          }, 2000);
-        } else {
-          setError(data.error || "Import failed");
-        }
-        return;
-      }
-
-      // Success
-      onSuccess?.(data.imported);
-      onOpenChange(false);
-      router.refresh();
-      
-    } catch (err: any) {
-      setError(err.message || "Import failed");
+      onClose();
+      onSuccess?.();
+    } catch (error) {
+      toast({
+        title: "Lỗi",
+        description: error instanceof Error ? error.message : "Không thể import từ khóa",
+        variant: "destructive",
+      });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
+  const downloadTemplate = () => {
+    const csv = 'keyword,target_position,priority,category,target_url\n"máy tính xách tay",3,high,"Sản phẩm","https://example.com/laptop"\n"laptop gaming",5,medium,"Sản phẩm",\n"mua laptop online",10,low,"Blog",';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'keywords_template.csv';
+    link.click();
+  };
+
+  const resetState = () => {
+    setFile(null);
+    setParsedData([]);
+    setErrors([]);
+    setUploadProgress(0);
+  };
+
+  const handleClose = () => {
+    resetState();
+    onClose();
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/80 backdrop-blur-sm animate-in fade-in" />
-        <Dialog.Content className="fixed left-[50%] top-[50%] max-h-[85vh] w-[90vw] max-w-[600px] translate-x-[-50%] translate-y-[-50%] rounded-lg bg-black/90 backdrop-blur-xl border border-white/10 p-6 shadow-xl animate-in fade-in zoom-in-95">
-          <Dialog.Title className="text-xl font-semibold text-white mb-4">
-            Import Keywords
-          </Dialog.Title>
-          
-          <Dialog.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100">
-            <X className="h-4 w-4 text-white" />
-          </Dialog.Close>
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Import từ khóa từ file CSV</DialogTitle>
+          <DialogDescription>
+            Upload file CSV chứa danh sách từ khóa cần theo dõi
+          </DialogDescription>
+        </DialogHeader>
 
-          <div className="space-y-4">
-            {/* Import Type Tabs */}
-            <div className="flex gap-2 p-1 bg-white/5 rounded-lg">
-              <button
-                onClick={() => setImportType("file")}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                  importType === "file"
-                    ? "bg-white/10 text-white"
-                    : "text-white/60 hover:text-white"
+        <div className="flex-1 overflow-auto">
+          {!file ? (
+            <div className="space-y-4">
+              <div
+                {...getRootProps()}
+                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                  isDragActive ? 'border-primary bg-primary/10' : 'border-white/20 hover:border-white/40'
                 }`}
               >
-                Upload File
-              </button>
-              <button
-                onClick={() => setImportType("manual")}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                  importType === "manual"
-                    ? "bg-white/10 text-white"
-                    : "text-white/60 hover:text-white"
-                }`}
-              >
-                Manual Entry
-              </button>
+                <input {...getInputProps()} />
+                <Upload className="mx-auto h-12 w-12 text-white/40 mb-4" />
+                <p className="text-white/80 mb-2">
+                  {isDragActive ? 'Thả file vào đây...' : 'Kéo thả file CSV hoặc click để chọn file'}
+                </p>
+                <p className="text-sm text-white/50">
+                  Hỗ trợ file .csv, .xls, .xlsx
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Alert className="flex-1 mr-4">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    File CSV cần có ít nhất cột "keyword". Các cột khác: target_position, priority, category, target_url
+                  </AlertDescription>
+                </Alert>
+                <Button variant="outline" onClick={downloadTemplate}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Tải template
+                </Button>
+              </div>
             </div>
-
-            {importType === "file" ? (
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">
-                  Upload CSV or JSON file
-                </label>
-                <div className="border-2 border-dashed border-white/20 rounded-lg p-8 text-center hover:border-white/30 transition-colors">
-                  <input
-                    type="file"
-                    accept=".csv,.json"
-                    onChange={(e) => setFile(e.target.files?.[0] || null)}
-                    className="hidden"
-                    id="file-upload"
-                    disabled={loading}
-                  />
-                  <label htmlFor="file-upload" className="cursor-pointer">
-                    {file ? (
-                      <div className="space-y-2">
-                        <FileText className="w-12 h-12 text-purple-400 mx-auto" />
-                        <p className="text-white font-medium">{file.name}</p>
-                        <p className="text-white/50 text-sm">
-                          {(file.size / 1024).toFixed(1)} KB
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <Upload className="w-12 h-12 text-white/40 mx-auto" />
-                        <p className="text-white/60">
-                          Click to upload or drag and drop
-                        </p>
-                        <p className="text-white/40 text-sm">
-                          CSV or JSON files
-                        </p>
-                      </div>
-                    )}
-                  </label>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between bg-white/5 rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-8 w-8 text-white/60" />
+                  <div>
+                    <p className="font-medium">{file.name}</p>
+                    <p className="text-sm text-white/50">
+                      {parsedData.length} từ khóa • {(file.size / 1024).toFixed(2)} KB
+                    </p>
+                  </div>
                 </div>
-                
-                <div className="mt-2 text-xs text-white/50">
-                  CSV format: keyword,target_position,category,priority,target_url
-                </div>
+                <Button variant="outline" size="sm" onClick={resetState}>
+                  Chọn file khác
+                </Button>
               </div>
+
+              {errors.length > 0 && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    <div className="space-y-1">
+                      <p className="font-medium">Lỗi khi đọc file:</p>
+                      <ul className="list-disc pl-4 text-sm">
+                        {errors.slice(0, 5).map((error, i) => (
+                          <li key={i}>{error}</li>
+                        ))}
+                        {errors.length > 5 && (
+                          <li>... và {errors.length - 5} lỗi khác</li>
+                        )}
+                      </ul>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {parsedData.length > 0 && (
+                <div className="border border-white/10 rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-white/5">
+                        <TableHead className="text-white/70">Từ khóa</TableHead>
+                        <TableHead className="text-white/70">Vị trí mục tiêu</TableHead>
+                        <TableHead className="text-white/70">Độ ưu tiên</TableHead>
+                        <TableHead className="text-white/70">Danh mục</TableHead>
+                        <TableHead className="text-white/70">URL mục tiêu</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {parsedData.slice(0, 10).map((keyword, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="text-white/90">{keyword.keyword}</TableCell>
+                          <TableCell>{keyword.target_position || 3}</TableCell>
+                          <TableCell>{keyword.priority || 'medium'}</TableCell>
+                          <TableCell>{keyword.category || '-'}</TableCell>
+                          <TableCell className="truncate max-w-[200px]">
+                            {keyword.target_url || '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {parsedData.length > 10 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-white/50">
+                            ... và {parsedData.length - 10} từ khóa khác
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {isLoading && (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span>Đang import...</span>
+                    <span>{Math.round(uploadProgress)}%</span>
+                  </div>
+                  <Progress value={uploadProgress} className="h-2" />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={handleClose} disabled={isLoading}>
+            Hủy
+          </Button>
+          <Button 
+            onClick={handleImport} 
+            disabled={isLoading || parsedData.length === 0}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Đang import...
+              </>
             ) : (
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">
-                  Enter keywords (comma or line separated)
-                </label>
-                <textarea
-                  value={manualKeywords}
-                  onChange={(e) => setManualKeywords(e.target.value)}
-                  placeholder="laptop gaming, macbook pro, iphone 15..."
-                  className="w-full h-32 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/40 focus:outline-none focus:border-white/20 transition-colors resize-none"
-                  disabled={loading}
-                />
-                <div className="mt-2 text-xs text-white/50">
-                  Enter one keyword per line or separate with commas
-                </div>
-              </div>
+              <>
+                <Check className="mr-2 h-4 w-4" />
+                Import {parsedData.length} từ khóa
+              </>
             )}
-
-            {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                <div className="flex gap-2">
-                  <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                  <p className="text-sm text-red-300">{error}</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-6 flex justify-end gap-3">
-            <GlassButton
-              onClick={() => onOpenChange(false)}
-              variant="secondary"
-              size="md"
-              disabled={loading}
-            >
-              Cancel
-            </GlassButton>
-            <GlassButton
-              onClick={handleImport}
-              variant="gradient"
-              size="md"
-              disabled={loading || (importType === "file" ? !file : !manualKeywords.trim())}
-            >
-              {loading ? "Importing..." : "Import Keywords"}
-            </GlassButton>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

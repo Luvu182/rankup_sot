@@ -1,19 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Authenticated, AuthLoading } from "convex/react";
 import { useUser } from "@clerk/nextjs";
 import { useProject } from "@/hooks/use-project";
 import { Skeleton } from "@/components/ui/skeleton";
-import AppLayout from "@/components/layout/app-layout";
 import PageHeader from "@/components/ui/page-header";
 import GlassCard from "@/components/ui/glass-card";
 import GlassButton from "@/components/ui/glass-button";
+import { AddKeywordModal } from "@/components/keywords/add-keyword-modal";
+import { ImportKeywordsModal } from "@/components/keywords/import-keywords-modal";
 import {
   Plus,
   Search,
   Filter,
   Download,
+  Upload,
   Target,
   TrendingUp,
   Edit,
@@ -50,6 +51,8 @@ export default function KeywordsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [subscription, setSubscription] = useState<any>(null);
   const [total, setTotal] = useState(0);
 
   useEffect(() => {
@@ -78,7 +81,9 @@ export default function KeywordsPage() {
         const data = await response.json();
         setKeywords(data.data || []);
         setTotal(data.total || 0);
+        setSubscription(data.subscription || null);
       } else {
+        console.error('Failed to fetch keywords');
         setKeywords([]);
         setTotal(0);
       }
@@ -93,6 +98,24 @@ export default function KeywordsPage() {
 
   const handleAddKeyword = () => {
     setShowAddModal(true);
+  };
+
+  const handleDeleteKeyword = async (keywordId: string) => {
+    if (!confirm('Bạn có chắc chắn muốn xóa từ khóa này?')) return;
+    
+    try {
+      const response = await fetch(`/api/keywords?id=${keywordId}&projectId=${projectId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        fetchKeywords();
+      } else {
+        console.error('Failed to delete keyword');
+      }
+    } catch (error) {
+      console.error('Error deleting keyword:', error);
+    }
   };
 
   const handleExport = () => {
@@ -113,39 +136,39 @@ export default function KeywordsPage() {
   };
 
   return (
-    <>
-      <AuthLoading>
-        <div className="min-h-screen bg-black flex items-center justify-center">
-          <div className="space-y-4">
-            <Skeleton className="h-12 w-48" />
-            <Skeleton className="h-8 w-32" />
-            <Skeleton className="h-64 w-96" />
-          </div>
-        </div>
-      </AuthLoading>
-
-      <Authenticated>
-        <AppLayout>
-          <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto">
             <PageHeader
               title="Keywords"
               description={
                 projectName 
-                  ? `${total} từ khóa đang được theo dõi cho ${projectName}`
+                  ? (
+                    <div className="space-y-1">
+                      <p>{total} từ khóa đang được theo dõi cho {projectName}</p>
+                      {subscription && (
+                        <p className="text-sm text-white/50">
+                          Đã sử dụng {subscription.keywordsUsed}/{subscription.keywordLimit} từ khóa
+                        </p>
+                      )}
+                    </div>
+                  )
                   : "Vui lòng chọn một dự án để xem từ khóa"
               }
               actions={
                 projectId && (
-                  <>
+                  <div className="flex gap-2">
                     <GlassButton onClick={handleExport} size="md">
                       <Download className="w-4 h-4 mr-2" />
                       Xuất file
+                    </GlassButton>
+                    <GlassButton onClick={() => setShowImportModal(true)} size="md">
+                      <Upload className="w-4 h-4 mr-2" />
+                      Import CSV
                     </GlassButton>
                     <GlassButton onClick={handleAddKeyword} variant="gradient" size="md">
                         <Plus className="w-4 h-4 mr-2" />
                       Thêm từ khóa
                     </GlassButton>
-                  </>
+                  </div>
                 )
               }
             />
@@ -307,7 +330,10 @@ export default function KeywordsPage() {
                                 <Edit className="w-4 h-4 mr-2" />
                                 Chỉnh sửa
                               </DropdownMenuItem>
-                              <DropdownMenuItem className="text-red-400 hover:text-red-300 hover:bg-red-500/10">
+                              <DropdownMenuItem 
+                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                onClick={() => handleDeleteKeyword(keyword.keyword_id)}
+                              >
                                 <Trash className="w-4 h-4 mr-2" />
                                 Xóa
                               </DropdownMenuItem>
@@ -320,9 +346,24 @@ export default function KeywordsPage() {
                 </table>
               </div>
             )}
+            
+            {/* Add Keyword Modal */}
+            {projectId && (
+              <>
+                <AddKeywordModal
+                  open={showAddModal}
+                  onClose={() => setShowAddModal(false)}
+                  projectId={projectId}
+                  onSuccess={fetchKeywords}
+                />
+                <ImportKeywordsModal
+                  open={showImportModal}
+                  onClose={() => setShowImportModal(false)}
+                  projectId={projectId}
+                  onSuccess={fetchKeywords}
+                />
+              </>
+            )}
           </div>
-        </AppLayout>
-      </Authenticated>
-    </>
   );
 }

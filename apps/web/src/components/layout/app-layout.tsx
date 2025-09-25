@@ -1,10 +1,13 @@
 "use client";
 
-import { ReactNode } from "react";
-import { UserButton, useUser } from "@clerk/nextjs";
+import { ReactNode, useState } from "react";
+import { UserButton, useUser, useAuth } from "@clerk/nextjs";
+import { useQuery } from "convex/react";
+import { api } from "@Rankup-manager/backend/convex/_generated/api";
 import Sidebar from "./sidebar";
 import { cn } from "@/lib/utils";
 import { Bell, Search } from "lucide-react";
+import NotificationDropdown from "@/components/layout/notification-dropdown";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -12,6 +15,13 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const { user } = useUser();
+  const { userId } = useAuth();
+  const [showNotifications, setShowNotifications] = useState(false);
+  
+  // Get unread notification count
+  const unreadCount = useQuery(api.notifications.getUnreadCount, 
+    userId ? { userId } : "skip"
+  ) || 0;
   
   return (
     <div className="min-h-screen bg-black">
@@ -43,10 +53,30 @@ export default function AppLayout({ children }: AppLayoutProps) {
             {/* Actions */}
             <div className="flex items-center gap-4">
               {/* Notifications */}
-              <button className="relative p-2 rounded-lg hover:bg-white/5 transition-colors">
-                <Bell className="w-5 h-5 text-white/70" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-gradient-to-br from-pink-500 to-purple-500 rounded-full" />
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="relative p-2 rounded-lg hover:bg-white/5 transition-colors"
+                >
+                  <Bell className="w-5 h-5 text-white/70" />
+                  {unreadCount > 0 && (
+                    <>
+                      <span className="absolute top-1 right-1 w-2 h-2 bg-gradient-to-br from-pink-500 to-purple-500 rounded-full" />
+                      <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-gradient-to-br from-pink-500 to-purple-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white px-1">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    </>
+                  )}
+                </button>
+                
+                {/* Notification Dropdown */}
+                {showNotifications && (
+                  <NotificationDropdown 
+                    userId={userId!}
+                    onClose={() => setShowNotifications(false)}
+                  />
+                )}
+              </div>
 
               {/* User */}
               <div className="flex items-center gap-3">

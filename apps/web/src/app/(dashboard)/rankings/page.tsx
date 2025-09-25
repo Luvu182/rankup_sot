@@ -1,11 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Authenticated, AuthLoading } from "convex/react";
 import { useUser } from "@clerk/nextjs";
 import { useProject } from "@/hooks/use-project";
 import { Skeleton } from "@/components/ui/skeleton";
-import AppLayout from "@/components/layout/app-layout";
 import PageHeader from "@/components/ui/page-header";
 import GlassCard from "@/components/ui/glass-card";
 import GlassButton from "@/components/ui/glass-button";
@@ -108,20 +106,7 @@ export default function RankingsPage() {
   };
 
   return (
-    <>
-      <AuthLoading>
-        <div className="min-h-screen bg-black flex items-center justify-center">
-          <div className="space-y-4">
-            <Skeleton className="h-12 w-48" />
-            <Skeleton className="h-8 w-32" />
-            <Skeleton className="h-64 w-96" />
-          </div>
-        </div>
-      </AuthLoading>
-
-      <Authenticated>
-        <AppLayout>
-          <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto">
             <PageHeader
               title="Rankings"
               description={
@@ -364,8 +349,5 @@ export default function RankingsPage() {
               </div>
             )}
           </div>
-        </AppLayout>
-      </Authenticated>
-    </>
   );
 }

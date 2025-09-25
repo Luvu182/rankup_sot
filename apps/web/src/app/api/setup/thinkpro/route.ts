@@ -107,7 +107,6 @@ export async function GET() {
           name: thinkProProject.name,
           domain: thinkProProject.domain,
           bigQueryProjectId: thinkProProject.bigQueryProjectId,
-          domainVerified: thinkProProject.domainVerified
         }
       });
     }

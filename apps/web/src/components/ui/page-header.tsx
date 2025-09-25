@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 
 interface PageHeaderProps {
   title: string;
-  description?: string;
+  description?: string | ReactNode;
   actions?: ReactNode;
 }
 
@@ -15,7 +15,11 @@ export default function PageHeader({ title, description, actions }: PageHeaderPr
             {title}
           </h1>
           {description && (
-            <p className="mt-1 text-sm text-white/60">{description}</p>
+            typeof description === 'string' ? (
+              <p className="mt-1 text-sm text-white/60">{description}</p>
+            ) : (
+              <div className="mt-1 text-sm text-white/60">{description}</div>
+            )
           )}
         </div>
         {actions && (

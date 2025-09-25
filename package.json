@@ -19,5 +19,8 @@
     "tsx": "^4.20.5",
     "turbo": "^2.5.4"
   },
-  "packageManager": "pnpm@10.10.0"
+  "packageManager": "pnpm@10.10.0",
+  "dependencies": {
+    "date-fns": "^4.1.0"
+  }
 }
