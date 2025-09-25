@@ -143,8 +143,9 @@ export function useSingletonOperation(
     setIsExecuting(true);
     
     try {
-      await operation();
+      const result = await operation();
       console.log(`[SingletonOperation] Operation ${operationId} completed`);
+      return result;
     } catch (error) {
       console.error(`[SingletonOperation] Operation ${operationId} failed:`, error);
       throw error;

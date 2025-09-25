@@ -46,7 +46,10 @@ export function ProjectSyncModal({
   );
 
   const performSync = async (): Promise<void> => {
-    console.log('[SYNC-MODAL] Starting BigQuery sync', { bigQueryProjectId });
+    console.log('[SYNC-MODAL] Starting BigQuery sync', { bigQueryProjectId, projectId });
+    
+    // Small delay to ensure project is fully created in Convex
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     // Create AbortController for this request with timeout
     const controller = new AbortController();
@@ -61,10 +64,16 @@ export function ProjectSyncModal({
     try {
       // Update status to syncing in Convex
       console.log('[SYNC-MODAL] Setting status to syncing for project:', projectId);
-      await updateSyncStatus({
-        projectId,
-        status: "syncing",
-      });
+      try {
+        await updateSyncStatus({
+          projectId,
+          status: "syncing",
+        });
+        console.log('[SYNC-MODAL] Successfully set status to syncing');
+      } catch (syncingError) {
+        console.error('[SYNC-MODAL] Failed to set syncing status:', syncingError);
+        // Continue anyway - BigQuery sync is more important
+      }
 
       // Use idempotency manager to prevent duplicate API calls
       const response = await globalIdempotencyManager.execute(
@@ -122,9 +131,12 @@ export function ProjectSyncModal({
         // Call onClose after a short delay to ensure state updates
         setTimeout(() => {
           if (isMounted.current) {
+            console.log('[SYNC-MODAL] Calling onClose');
             onClose();
           }
         }, 1000);
+      } else {
+        console.log('[SYNC-MODAL] Component unmounted, skipping status update');
       }
     } catch (err) {
       // Clear timeout
