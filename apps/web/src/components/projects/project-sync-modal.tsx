@@ -60,6 +60,7 @@ export function ProjectSyncModal({
     
     try {
       // Update status to syncing in Convex
+      console.log('[SYNC-MODAL] Setting status to syncing for project:', projectId);
       await updateSyncStatus({
         projectId,
         status: "syncing",
@@ -99,11 +100,17 @@ export function ProjectSyncModal({
       // Only update state if component is still mounted
       if (isMounted.current) {
         // Update status to synced
-        console.log('[SYNC-MODAL] Updating status to synced');
-        await updateSyncStatus({
-          projectId,
-          status: "synced",
-        });
+        console.log('[SYNC-MODAL] Updating status to synced for project:', projectId);
+        try {
+          await updateSyncStatus({
+            projectId,
+            status: "synced",
+          });
+          console.log('[SYNC-MODAL] Status updated successfully in Convex');
+        } catch (updateError) {
+          console.error('[SYNC-MODAL] Failed to update status in Convex:', updateError);
+          throw updateError;
+        }
 
         setStatus("success");
         console.log('[SYNC-MODAL] Sync completed successfully');

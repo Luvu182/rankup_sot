@@ -106,6 +106,10 @@ export default function ProjectsPage() {
   const handleProjectCreated = () => {
     setIsCreateDialogOpen(false);
     // The project list will automatically update due to Convex reactivity
+    // Force refresh by resetting search to trigger re-render
+    const currentSearch = searchTerm;
+    setSearchTerm('');
+    setTimeout(() => setSearchTerm(currentSearch), 100);
   };
 
   const formatDate = (timestamp: number) => {
