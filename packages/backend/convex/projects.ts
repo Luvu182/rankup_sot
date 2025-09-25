@@ -387,6 +387,8 @@ export const updateSyncStatus = mutation({
     error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    console.log("[updateSyncStatus] Called with:", args);
+    
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");
@@ -395,6 +397,7 @@ export const updateSyncStatus = mutation({
     // Get the project to verify ownership
     const project = await ctx.db.get(args.projectId);
     if (!project) {
+      console.error("[updateSyncStatus] Project not found:", args.projectId);
       throw new Error("Project not found");
     }
 
@@ -421,6 +424,7 @@ export const updateSyncStatus = mutation({
     }
 
     await ctx.db.patch(args.projectId, updateData);
+    console.log("[updateSyncStatus] Updated project with:", updateData);
 
     // Create notification for user
     if (args.status === "synced") {

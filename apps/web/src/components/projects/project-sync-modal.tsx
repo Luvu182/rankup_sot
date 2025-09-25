@@ -100,13 +100,17 @@ export function ProjectSyncModal({
       // Only update state if component is still mounted
       if (isMounted.current) {
         // Update status to synced
-        console.log('[SYNC-MODAL] Updating status to synced for project:', projectId);
+        console.log('[SYNC-MODAL] Updating status to synced for project:', {
+          projectId,
+          projectIdType: typeof projectId,
+          projectIdValue: projectId
+        });
         try {
-          await updateSyncStatus({
+          const updateResult = await updateSyncStatus({
             projectId,
             status: "synced",
           });
-          console.log('[SYNC-MODAL] Status updated successfully in Convex');
+          console.log('[SYNC-MODAL] Status updated successfully in Convex:', updateResult);
         } catch (updateError) {
           console.error('[SYNC-MODAL] Failed to update status in Convex:', updateError);
           throw updateError;

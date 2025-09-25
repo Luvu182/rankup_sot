@@ -208,6 +208,8 @@ export function ProjectForm({ project, onSuccess }: ProjectFormProps) {
       } else {
         const result = await createProjectMutation(values);
         
+        console.log('[PROJECT-FORM] Create project result:', result);
+        
         // Show sync modal
         setNewProjectData({
           projectId: result.projectId,
