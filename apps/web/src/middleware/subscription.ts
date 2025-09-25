@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { Redis } from "@upstash/redis";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@Rankup-manager/backend/convex/_generated/api";
+import { Id } from "@Rankup-manager/backend/convex/_generated/dataModel";
+import { getKeywords } from "@Rankup-manager/backend/lib/bigquery-client";
 import { 
   SUBSCRIPTION_FEATURES, 
   SUBSCRIPTION_ERRORS,
@@ -142,8 +144,31 @@ export async function canAddKeywords(
   
   if (keywordCount === null) {
     // Cache miss, query from BigQuery
-    // This will be replaced with actual BigQuery query
-    keywordCount = 0; // TODO: Implement BigQuery count
+    try {
+      // Get project details from Convex first to get BigQuery ID
+      const { getToken } = await auth();
+      const token = await getToken({ template: "convex" });
+      convex.setAuth(token || undefined);
+      
+      const project = await convex.query(api.projects.getProject, {
+        projectId: projectId as Id<"projects">
+      });
+      
+      if (project && project.bigQueryProjectId) {
+        // Get actual keyword count from BigQuery
+        const keywords = await getKeywords(project.bigQueryProjectId, { 
+          limit: 1, 
+          offset: 0,
+          userId: undefined // We already verified access via Convex
+        });
+        keywordCount = keywords.total || 0;
+      } else {
+        keywordCount = 0;
+      }
+    } catch (error) {
+      console.error("Error getting keyword count:", error);
+      keywordCount = 0;
+    }
     
     // Cache for 1 minute
     await redis.setex(cacheKey, CACHE_TTL.KEYWORD_COUNT, keywordCount);

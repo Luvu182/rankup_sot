@@ -166,11 +166,44 @@ export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: Imp
     setUploadProgress(0);
     
     try {
+      // First, check the keyword limit before importing
+      const checkResponse = await fetch(`/api/keywords/check-limit?projectId=${projectId}&count=${parsedData.length}`);
+      const limitData = await checkResponse.json();
+      
+      if (!limitData.canAdd) {
+        const confirmMessage = limitData.remaining > 0 
+          ? `Bạn chỉ có thể thêm ${limitData.remaining} từ khóa nữa (giới hạn: ${limitData.limit}). Import ${limitData.remaining} từ khóa đầu tiên?`
+          : `Bạn đã đạt giới hạn ${limitData.limit} từ khóa. Vui lòng nâng cấp gói để thêm từ khóa.`;
+        
+        if (limitData.remaining === 0 || !confirm(confirmMessage)) {
+          toast({
+            title: "Vượt giới hạn từ khóa",
+            description: confirmMessage,
+            variant: "destructive",
+            action: limitData.remaining === 0 ? (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => window.location.href = "/settings/billing"}
+              >
+                Nâng cấp
+              </Button>
+            ) : undefined,
+          });
+          return;
+        }
+      }
+      
+      // Limit keywords to available slots
+      const keywordsToImport = limitData.canAdd 
+        ? parsedData 
+        : parsedData.slice(0, limitData.remaining);
+      
       const batchSize = 50;
       const batches = [];
       
-      for (let i = 0; i < parsedData.length; i += batchSize) {
-        batches.push(parsedData.slice(i, i + batchSize));
+      for (let i = 0; i < keywordsToImport.length; i += batchSize) {
+        batches.push(keywordsToImport.slice(i, i + batchSize));
       }
 
       let processed = 0;
@@ -209,12 +242,15 @@ export function ImportKeywordsModal({ open, onClose, projectId, onSuccess }: Imp
         }
 
         processed += batch.length;
-        setUploadProgress((processed / parsedData.length) * 100);
+        setUploadProgress((processed / keywordsToImport.length) * 100);
       }
 
+      const skippedCount = parsedData.length - keywordsToImport.length;
       toast({
         title: "Import thành công!",
-        description: `Đã import ${processed} từ khóa`,
+        description: skippedCount > 0 
+          ? `Đã import ${processed} từ khóa (bỏ qua ${skippedCount} từ khóa do vượt giới hạn)`
+          : `Đã import ${processed} từ khóa`,
       });
 
       onClose();
