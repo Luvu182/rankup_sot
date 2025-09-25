@@ -106,25 +106,26 @@ export function ProjectSyncModal({
       // Clear timeout
       clearTimeout(timeoutId);
       
-      // Only update state if component is still mounted
-      if (isMounted.current) {
-        // Update status to synced
-        console.log('[SYNC-MODAL] Updating status to synced for project:', {
+      // ALWAYS update status in database, regardless of component mount state
+      console.log('[SYNC-MODAL] Updating status to synced for project:', {
+        projectId,
+        projectIdType: typeof projectId,
+        projectIdValue: projectId
+      });
+      
+      try {
+        const updateResult = await updateSyncStatus({
           projectId,
-          projectIdType: typeof projectId,
-          projectIdValue: projectId
+          status: "synced",
         });
-        try {
-          const updateResult = await updateSyncStatus({
-            projectId,
-            status: "synced",
-          });
-          console.log('[SYNC-MODAL] Status updated successfully in Convex:', updateResult);
-        } catch (updateError) {
-          console.error('[SYNC-MODAL] Failed to update status in Convex:', updateError);
-          throw updateError;
-        }
-
+        console.log('[SYNC-MODAL] Status updated successfully in Convex:', updateResult);
+      } catch (updateError) {
+        console.error('[SYNC-MODAL] Failed to update status in Convex:', updateError);
+        throw updateError;
+      }
+      
+      // Only update UI state if mounted
+      if (isMounted.current) {
         setStatus("success");
         console.log('[SYNC-MODAL] Sync completed successfully');
         
@@ -136,7 +137,7 @@ export function ProjectSyncModal({
           }
         }, 1000);
       } else {
-        console.log('[SYNC-MODAL] Component unmounted, skipping status update');
+        console.log('[SYNC-MODAL] Component unmounted, but status was updated in database');
       }
     } catch (err) {
       // Clear timeout
@@ -162,13 +163,31 @@ export function ProjectSyncModal({
             }
           }, RETRY_DELAY);
         } else {
-          // Final failure after all retries
-          setStatus("error");
+          // Final failure after all retries - ALWAYS update database
+          try {
+            await updateSyncStatus({
+              projectId,
+              status: "failed",
+              error: err instanceof Error ? err.message : 'Unknown error',
+            });
+          } catch (updateErr) {
+            console.error('[SYNC-MODAL] Failed to update error status:', updateErr);
+          }
+          
+          if (isMounted.current) {
+            setStatus("error");
+          }
+        }
+      } else {
+        // Not mounted but still try to update database
+        try {
           await updateSyncStatus({
             projectId,
             status: "failed",
-            error: err instanceof Error ? err.message : 'Unknown error',
+            error: err instanceof Error ? err.message : 'Component unmounted during sync',
           });
+        } catch (updateErr) {
+          console.error('[SYNC-MODAL] Failed to update error status:', updateErr);
         }
       }
     }
